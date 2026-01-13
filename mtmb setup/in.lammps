@@ -1,0 +1,69 @@
+echo both
+
+variable        temperature equal 4000.0
+variable        tnew equal ${temperature}+1000
+variable        tempDamp equal 0.01 # 0.1 ps standard value
+
+variable        pressure equal 1400000.0
+variable        pressureDamp equal 0.1 # This is 10 ps
+
+variable        seed world 74581
+
+variable        out_freq equal 500
+variable        out_freq2 equal 500
+
+
+#calculate fparam for deepmd potential
+variable       kBeV equal 8.617333262e-5    # eV/K, Boltzmann
+variable       TeV equal  ${temperature}*${kBeV} #t_new instead?
+
+units           metal
+atom_style      atomic
+
+boundary        p p p # periodic boundary
+
+
+neighbor         2 bin
+neigh_modify    delay 10 every 1
+read_data       conf.lmp
+mass             1 24.305
+mass             2 15.999
+mass             3 20.1797
+
+
+pair_style      deepmd /your/potential/path/here/ fparam ${TeV}
+pair_coeff * *
+
+neighbor        2.0 bin
+neigh_modify    every 10 delay 0 check no
+
+timestep        0.001
+
+thermo          ${out_freq}
+thermo_style    custom step temp pe vol press pxx pyy pzz pxy pxz pyz
+
+
+# NPT, equil the system at the center P and T
+reset_timestep  0
+velocity        all create ${tnew} ${seed}
+fix             1 all npt temp ${tnew} ${tnew} ${tempDamp} iso ${pressure} ${pressure} ${pressureDamp}
+run             1000 
+unfix 1
+
+# MPMT, only dump the MPMT trajectory
+dump            myDump all atom ${out_freq2} mtmb.dump
+fix             1 all plumed plumedfile plumed.dat outfile plumed.out
+fix             2 all nph iso ${pressure} ${pressure} ${pressureDamp}
+fix             3 all temp/csvr ${temperature} ${temperature} ${tempDamp} ${seed}
+fix             4 all momentum 10000 linear 1 1 1 angular
+
+run             1000000 # 1 ns
+
+
+unfix 1
+unfix 2
+unfix 3
+unfix 4
+
+
+write_data      data.final
